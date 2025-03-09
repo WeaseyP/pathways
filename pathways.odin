@@ -49,8 +49,9 @@ Player :: struct{
     max_speed: f32,
     sword: Sword,
     health: f32,
+    health_lost: f32,
     imortal_timer: f32,
-    points: f32,
+    score: f32,
 }
 player: Player
 
@@ -130,7 +131,9 @@ restart:: proc() {
             attack_speed = 6.0, // Adjust attcurrent_sizeack speed
             damage = {}
         },
+        score = 0,
         health = 100,
+        health_lost = 0,
         imortal_timer = 0,
     }
 
@@ -160,6 +163,10 @@ update_enemy :: proc(enemy: ^Basic_Enemy, dt: f32){
         // Clamp position to prevent going out of bounds
         enemy.pos.x = clamp(enemy.pos.x, 0, WORLD_SIZE - enemy.radius)
         enemy.pos.y = clamp(enemy.pos.y, 0, WORLD_SIZE - enemy.radius)
+
+        enemy.health = 10 + player.score / 100
+        enemy.max_speed = 6.0 + player.score / 1000
+        enemy.radius = 20 + player.score / 1000
 }
 
 update_player :: proc(player: ^Player, dt: f32) {
@@ -178,6 +185,14 @@ update_player :: proc(player: ^Player, dt: f32) {
     // Clamp position to prevent going out of bounds
     player.pos.x = clamp(player.pos.x, 0, WORLD_SIZE - player.current_size.x)
     player.pos.y = clamp(player.pos.y, 0, WORLD_SIZE - player.current_size.y)
+
+    player.sword.attack_speed = 6.0 + player.score / 100
+    player.health = 100 + player.score / 1000    
+    player.sword.size.x = 120.0 + player.score / 10000
+    player.sword.size.y = 10.0 + player.score / 100000
+    player.max_speed = 400.0 + player.score / 1000000
+    player.base_size = {70+ player.score / 10000000, 70 + player.score / 1000000}
+
 
     // Update player size based on velocity (stretch based on movement)
     update_size(player)
@@ -410,7 +425,7 @@ basic_enemies_find :: proc(player_pos: rl.Vector2, enemy: ^Basic_Enemy, basic_en
                 pos = enemy.pos,
                 move_speed = 10,
                 damage = sword.attack_speed,
-                alpha = 100,
+                alpha = 5 * sword.attack_speed,
             }
             append(&damage_ticker, damage_tick)
         }
@@ -420,7 +435,7 @@ basic_enemies_find :: proc(player_pos: rl.Vector2, enemy: ^Basic_Enemy, basic_en
                 pos = enemy.pos,
                 move_speed = 10,
                 damage = 1,
-                alpha = 100,
+                alpha = 5,
             }
             append(&damage_ticker, damage_tick)
         }
@@ -457,7 +472,7 @@ main :: proc() {
                 if check_player_collision(enemy.pos, enemy.radius, player) {
                     if player.imortal_timer <= 0{
                         player.imortal_timer = DT + 100
-                        player.health -= 10
+                        player.health_lost += 10
                     }
                 }
                 if player.imortal_timer > 0 {
@@ -471,6 +486,7 @@ main :: proc() {
                         }
                     }
                     basic_enemies = new_basic_enemies
+                    player.score += enemy.health_lost
                 }
             }
 
@@ -537,8 +553,10 @@ main :: proc() {
 
         }
 
-        player_health_text := fmt.ctprint("Health: ", player.health)
+        player_health_text := fmt.ctprint("Health: ", player.health-player.health_lost)
 		rl.DrawText(player_health_text, 10, 10, 20, rl.WHITE)
+        player_score_text := fmt.ctprint("Score: ", player.score)
+        rl.DrawText(player_score_text, 10, 30, 20, rl.WHITE)
 
         // Begin 2D mode using the camera.
         rl.BeginMode2D(camera)
@@ -591,7 +609,7 @@ main :: proc() {
             )
                 
 
-            if player.health <= 0 {
+            if player.health-player.health_lost <= 0 {
                 game_over = true
             }
         }
