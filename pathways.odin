@@ -36,6 +36,7 @@ Sword :: struct {
     attacking: bool,     // If true, the sword is swinging
     attack_speed: f32,   // How fast the sword moves (in radians per frame)
     attacked: bool,
+    damage: [dynamic]f32,
 }
 
 sword: Sword
@@ -49,6 +50,7 @@ Player :: struct{
     sword: Sword,
     health: f32,
     imortal_timer: f32,
+    points: f32,
 }
 player: Player
 
@@ -59,9 +61,20 @@ Basic_Enemy :: struct{
     max_speed: f32,
     hit: bool,
     hit_distance: rl.Vector2,
-    health: f32
+    health: f32,
+    health_lost: f32
 }
-basic_enemies: [NUM_ENEMIES]Basic_Enemy
+basic_enemies: [dynamic]Basic_Enemy
+
+
+Damage_Ticker :: struct{
+    pos: rl.Vector2,
+    move_speed: f32,
+    damage: f32,
+    alpha: f32,
+}
+
+damage_ticker: [dynamic]Damage_Ticker
 camera: rl.Camera2D
 
 game_over: bool
@@ -81,7 +94,7 @@ restart:: proc() {
     }
 
     for i := 0; i < NUM_ENEMIES; i += 1 {
-        basic_enemies[i] = Basic_Enemy{
+        basic_enemy := Basic_Enemy{
             pos = {
                 f32(rand.int_max(WORLD_SIZE)),
                 f32(rand.int_max(WORLD_SIZE))
@@ -91,8 +104,10 @@ restart:: proc() {
             max_speed = 20,
             hit = false,
             hit_distance = {0,0},
-            health = 10
+            health = 10,
+            health_lost = 0,
         }
+        append(&basic_enemies, basic_enemy)
     }
     game_over = false
 
@@ -105,14 +120,15 @@ restart:: proc() {
         max_speed = 400,
         sword = Sword{
             pos = {
-                starting_pos + 70 / 2 + math.cos_f32(rl.DEG2RAD * 0) * 40,
-                starting_pos + 70 / 2 + math.sin_f32(rl.DEG2RAD * 0) * 40,
+                starting_pos + 70 / 2 + math.cos_f32(rl.DEG2RAD * 0) * 45,
+                starting_pos + 70 / 2 + math.sin_f32(rl.DEG2RAD * 0) * 45,
             },
             offset = {0, 100},   // Start on the right
-            size = {70, 10},    // Sword size
+            size = {120, 10},    // Sword size
             angle = 0,        // Start pointing left
             attacking = false,
             attack_speed = 6.0, // Adjust attcurrent_sizeack speed
+            damage = {}
         },
         health = 100,
         imortal_timer = 0,
@@ -195,16 +211,16 @@ update_sword :: proc(player: ^Player) {
     if player.sword.attacking && player.sword.attacked{
         player.sword.angle += player.sword.attack_speed  // Rotate the sword
         // Reset attack when it reaches a full rotation
-        if player.sword.angle < player.sword.starting_angle {
+        if player.sword.angle > player.sword.starting_angle+180 {
             player.sword.attacking = false
             player.sword.attacked = false
         }
     }
-    else if player.sword.attacking && player.sword.attacked == false{
+    else if player.sword.attacking && !player.sword.attacked{
         player.sword.angle -= player.sword.attack_speed  // Rotate the sword
 
         // Reset attack when it reaches a full rotation
-        if player.sword.angle > player.sword.starting_angle {
+        if player.sword.angle < player.sword.starting_angle-180 {
             player.sword.attacking = false
             player.sword.attacked = true
         }
@@ -215,11 +231,17 @@ update_sword :: proc(player: ^Player) {
         angle := math.atan2(player.velocity.y, player.velocity.x) * rl.RAD2DEG
             // Normalize the angle to be between 0 and 360 degrees
         if angle < 0 {
-            angle += 360
+            angle = 360
         }
         if angle >= 360 {
-            angle -= 360
+            angle = 0
         }
+    //    if player.sword.angle < 0 {
+    // //       player.sword.angle = 360
+     //   }
+       // if player.sword.angle >= 0 {
+       //     player.sword.angle = 0
+        //}
     
         // Adjust the sword's angle to be 45 degrees relative to the movement direction
         if(player.sword.angle < angle + 45.0){
@@ -232,14 +254,6 @@ update_sword :: proc(player: ^Player) {
     player.sword.pos = rl.Vector2{
         player.pos.x + player.current_size.x / 2 + math.cos(rl.DEG2RAD * player.sword.angle) * 40,
         player.pos.y + player.current_size.y / 2 + math.sin(rl.DEG2RAD * player.sword.angle) * 40,
-    }
-
-    // Normalize the sword angle to be between 0 and 360 degrees
-    if player.sword.angle < 0 {
-        player.sword.angle += 360
-    }
-    if player.sword.angle >= 360 {
-        player.sword.angle -= 360
     }
 
 }
@@ -298,11 +312,8 @@ check_player_collision :: proc(enemy_pos: rl.Vector2, enemy_radius: f32, player:
 
 // A function to check if two rectangles (enemy and sword) are colliding
 check_sword_collision :: proc(enemy_pos: rl.Vector2, enemy_radius: f32, sword: Sword) -> bool {
-    sword_rect := rl.Rectangle {
-        sword.pos.x, sword.pos.y,
-        sword.size.x, sword.size.y,
-    }
-    return rl.CheckCollisionCircleRec(enemy_pos, enemy_radius, sword_rect) 
+    sword_hit_radius := math.max(sword.size.x, sword.size.y) / 2
+    return rl.CheckCollisionCircles(sword.pos, sword_hit_radius, enemy_pos, enemy_radius)
 }
 
 
@@ -327,7 +338,7 @@ camera_deadzone :: proc(camera: ^rl.Camera2D, player: ^Player, dt: f32) {
     }
 }
 
-basic_enemies_find :: proc(player_pos: rl.Vector2, enemy: ^Basic_Enemy, basic_enemies: [500]Basic_Enemy, sword: Sword, dt: f32){
+basic_enemies_find :: proc(player_pos: rl.Vector2, enemy: ^Basic_Enemy, basic_enemies: [dynamic]Basic_Enemy, sword: Sword, dt: f32){
     if(enemy.hit == false){
         if enemy.pos.x < player_pos.x{
             enemy.velocity.x += MAX_ACCELERATION * dt
@@ -342,20 +353,19 @@ basic_enemies_find :: proc(player_pos: rl.Vector2, enemy: ^Basic_Enemy, basic_en
             enemy.velocity.y -= MAX_ACCELERATION * dt
         }
         max_speed_multipler := f32(1)
-        if enemy.pos.x < player_pos.x - 200{
+        if enemy.pos.x < player_pos.x - 100{
             max_speed_multipler += 1
         }
-        if enemy.pos.x > player_pos.x + 200{
+        if enemy.pos.x > player_pos.x + 100{
             max_speed_multipler += 1
         }
-        if enemy.pos.y < player_pos.y - 200{
+        if enemy.pos.y < player_pos.y - 100{
             max_speed_multipler += 1
         }
-        if enemy.pos.y > player_pos.y + 200{
+        if enemy.pos.y > player_pos.y + 100{
             max_speed_multipler += 1
         }
-        enemy.max_speed = STATIC_MAX_SPEED*max_speed_multipler
-
+        enemy.max_speed = STATIC_MAX_SPEED * max_speed_multipler
     }
     else{
         if enemy.pos.x < player_pos.x{
@@ -395,17 +405,31 @@ basic_enemies_find :: proc(player_pos: rl.Vector2, enemy: ^Basic_Enemy, basic_en
             enemy.velocity.y = -enemy.velocity.y * 10; // Reverse and reduce velocity (bounce effect)
         }
         if(sword.attacking == true){
-            enemy.health -= sword.attack_speed
+            enemy.health_lost += sword.attack_speed
+            damage_tick := Damage_Ticker{
+                pos = enemy.pos,
+                move_speed = 10,
+                damage = sword.attack_speed,
+                alpha = 100,
+            }
+            append(&damage_ticker, damage_tick)
         }
         else{
-            enemy.health -= 1
+            enemy.health_lost += 1
+            damage_tick := Damage_Ticker{
+                pos = enemy.pos,
+                move_speed = 10,
+                damage = 1,
+                alpha = 100,
+            }
+            append(&damage_ticker, damage_tick)
         }
     }
     for other_enemy in basic_enemies{
         if other_enemy.pos != enemy.pos{
             if rl.CheckCollisionCircles(enemy.pos, enemy.radius, other_enemy.pos, other_enemy.radius)  {
-                enemy.velocity.x = -enemy.velocity.x * 0.5; // Reverse and reduce velocity (bounce effect)
-                enemy.velocity.y = -enemy.velocity.y * 0.5; // Reverse and reduce velocity (bounce effect)
+                enemy.velocity.x = -enemy.velocity.x * 2; // Reverse and reduce velocity (bounce effect)
+                enemy.velocity.y = -enemy.velocity.y * 2; // Reverse and reduce velocity (bounce effect)
             }
         }
     }
@@ -414,6 +438,7 @@ basic_enemies_find :: proc(player_pos: rl.Vector2, enemy: ^Basic_Enemy, basic_en
     enemy.velocity.y = clamp(enemy.velocity.y, -enemy.max_speed, enemy.max_speed)
     update_enemy(enemy, dt)
 }
+
 
 main :: proc() {
 
@@ -438,11 +463,20 @@ main :: proc() {
                 if player.imortal_timer > 0 {
                     player.imortal_timer -= DT
                 }
+                if enemy.health_lost >= enemy.health{
+                    new_basic_enemies := [dynamic]Basic_Enemy{}  // Create a new slice to store balls that are not removed
+                    for basic_enemy in basic_enemies {
+                        if basic_enemy.pos != enemy.pos {  // Keep balls that don't match the one to remove
+                            append(&new_basic_enemies, basic_enemy)
+                        }
+                    }
+                    basic_enemies = new_basic_enemies
+                }
             }
 
             player.sword.pos = {
-                player.pos.x + player.base_size.x / 2 + math.cos_f32(rl.DEG2RAD * player.sword.angle) * 40,
-                player.pos.y + player.base_size.y / 2 + math.sin_f32(rl.DEG2RAD * player.sword.angle) * 40,
+                player.pos.x + player.current_size.x / 2 + math.cos_f32(rl.DEG2RAD * player.sword.angle) * 40,
+                player.pos.y + player.current_size.y / 2 + math.sin_f32(rl.DEG2RAD * player.sword.angle) * 40,
             }
 
             if rl.IsKeyPressed(.SPACE) {
@@ -452,6 +486,7 @@ main :: proc() {
                     player.sword.starting_angle = player.sword.angle  // Start from left
                 }
             }
+
         }
 
 
@@ -474,6 +509,33 @@ main :: proc() {
                 restart()
             }
         }
+        
+        for i := 0; i < len(damage_ticker); i += 1 {
+            damage := &damage_ticker[i] // Get a mutable reference
+        
+            fmt.printf("Damage position: %v\n", i32(damage.pos.y))
+            fmt.printf("Player position: %v\n", player.pos.y)
+        
+            damage_text := fmt.ctprint(damage.damage)
+        
+            rl.DrawText(damage_text, i32(i32(SCREEN_SIZE/2)+i32(i*15)), i32(i32(SCREEN_SIZE/2) + i32(i * 15)), i32(damage.alpha), rl.WHITE)
+        
+            // Update position and alpha
+            damage.pos.y += 10
+            damage.alpha -= 1
+        
+            // Remove damage when fully faded
+            if damage.alpha <= 0 {
+                new_damage_ticker := [dynamic]Damage_Ticker{}
+                for new_damage in damage_ticker{
+                    if new_damage.pos != damage.pos{
+                        append(&new_damage_ticker, new_damage)
+                    } // Swap with last element
+                }
+                damage_ticker = new_damage_ticker
+            }
+
+        }
 
         player_health_text := fmt.ctprint("Health: ", player.health)
 		rl.DrawText(player_health_text, 10, 10, 20, rl.WHITE)
@@ -486,16 +548,15 @@ main :: proc() {
                 rl.DrawCircleV(star.pos, star.size, star.color)
             }
             for &enemy in basic_enemies{
-                if enemy.health > 0{
-                    color: rl.Color
-                    if enemy.hit == true{
-                        color = rl.RED
-                    }
-                    else{
-                        color = rl.WHITE
-                    }
-                    rl.DrawCircleV(enemy.pos, enemy.radius, color)
+                color: rl.Color
+                if enemy.hit == true{
+                    color = rl.RED
                 }
+                else{
+                    color = rl.WHITE
+                }
+
+                rl.DrawCircleV(enemy.pos, enemy.radius, color)
             }
 
             // Draw your game world here (player, obstacles, etc.)
@@ -512,12 +573,23 @@ main :: proc() {
                 current_size = player.current_size.x
             }
 
-
+           // sword_aabb := get_aabb_from_rotated_rect(player.sword.pos, player.sword.size, player.sword.angle)
+            // Draw the AABB for debugging
+            /*
+            rl.DrawRectangleLines(
+                i32(sword_aabb.x), i32(sword_aabb.y),
+                i32(sword_aabb.width), i32(sword_aabb.height),
+                rl.BLUE
+            )
+                */
+            
             rl.DrawRectanglePro(
                 {player.sword.pos.x, player.sword.pos.y, player.sword.size.x, player.sword.size.y},
                 {current_size * -0.1, player.sword.size.y / 2},  // Pivot at the base of the sword
-                player.sword.angle, rl.RED
+                player.sword.angle,
+                rl.RED
             )
+                
 
             if player.health <= 0 {
                 game_over = true
